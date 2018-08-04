@@ -1,2 +1,2 @@
 # RentalContracts
-Rental Contracts written on Solidity
+StayBit Rental Contracts written on Solidity
