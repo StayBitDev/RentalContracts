@@ -239,6 +239,33 @@ library DateTime {
 			}
 		}
 
+
+		//  t2 -> MoveIn or MoveOut day in GMT, will be counted as beginning of a day
+		//  t1 -> Current System DateTime
+		// -1 t1 before t2
+		//--------------------------------
+		// 0  t1 same day as t2
+		// 1  t1 after t2
+		function compareDateTimesForContract(uint t1, uint t2) public constant returns (int res)
+		{
+		    uint endOfDay = t2 + (60 * 60 * 24);
+		    res = 0;
+		    
+		    if (t2 <= t1 && t1 <= endOfDay)
+		    {
+		        res = 0;
+		    }
+		    else if (t2 > t1)
+		    {
+		        res = -1;
+		    }
+		    else if (t1 > endOfDay)
+		    {
+		        res = 1;
+		    }
+		}	
+
+
 		// -1 n1 < n2
 		// 0  n1 == n2
 		// 1  n1 > n2

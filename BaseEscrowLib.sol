@@ -85,7 +85,12 @@ library BaseEscrowLib
 
 	event logEvent(int stage, int atype, uint timestamp, string guid, string text);
 
-	bool private constant EnableSimulatedCurrentDate = true;
+
+	//DEBUG or TESTNET
+	//bool private constant EnableSimulatedCurrentDate = true;
+
+	//RELEASE
+	bool private constant EnableSimulatedCurrentDate = false;
 
 
 	//LogEvent wrapper
@@ -183,6 +188,9 @@ library BaseEscrowLib
 		int nPotentialBillableDays = (int)(self._MoveOutDate - self._MoveInDate) / (60 * 60 * 24);
 		int nPotentialBillableAmount = nPotentialBillableDays * (self._RentPerDay);
 		
+		//Limit 2 months stay
+		require (nPotentialBillableDays <= 60); 
+
 		self._TotalAmount = nPotentialBillableAmount + self._SecDeposit;
 				
 		//Sec Deposit should not be more than 30 perecent
@@ -315,17 +323,17 @@ library BaseEscrowLib
 			//Contract unfunded
 			stage = ContractStagePreMoveIn;
 		}		
-		else if (DateTime.compareDatesWithoutTime(nCurrentDate, self._MoveInDate) < 0)
+		else if (DateTime.compareDateTimesForContract(nCurrentDate, self._MoveInDate) < 0)
 		{
 			stage = ContractStagePreMoveIn;
 		}
-		else if (DateTime.compareDatesWithoutTime(nCurrentDate, self._MoveInDate) >= 0 && 
-		         DateTime.compareDatesWithoutTime(nCurrentDate, self._MoveOutDate) < 0 && 
+		else if (DateTime.compareDateTimesForContract(nCurrentDate, self._MoveInDate) >= 0 && 
+		         DateTime.compareDateTimesForContract(nCurrentDate, self._MoveOutDate) < 0 && 
 		         self._TenantConfirmedMoveIn)
 		{
 			stage = ContractStageLiving;
 		}
-		else if (DateTime.compareDatesWithoutTime(nCurrentDate, self._MoveOutDate) >= 0)
+		else if (DateTime.compareDateTimesForContract(nCurrentDate, self._MoveOutDate) >= 0)
 		{
 			stage = ContractStageTermination;
 		}	

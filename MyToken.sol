@@ -108,6 +108,9 @@ contract MyToken is ERC20Interface, Owned {
     uint public _totalSupply;
 	uint internal faucetAllowance;
 
+	uint256 public transferFeeNumerator = 0;
+	uint256 public transferFeeDenominator = 1;
+
     mapping(address => uint) balances;
     mapping(address => mapping(address => uint)) allowed;
 	mapping(address => uint) faucetWithdrawals;
@@ -119,7 +122,7 @@ contract MyToken is ERC20Interface, Owned {
     function MyToken() public {
         symbol = "STBT";
         name = "StayBit Token";
-        decimals = 2;
+        decimals = 18;
         _totalSupply = 1000000 * 10**uint(decimals);
 		faucetAllowance = 1000 * 10**uint(decimals);
         balances[owner] = _totalSupply;
@@ -152,6 +155,7 @@ contract MyToken is ERC20Interface, Owned {
         balances[msg.sender] = balances[msg.sender].sub(tokens);
         balances[to] = balances[to].add(tokens);
         Transfer(msg.sender, to, tokens);
+		collectTransferFee(to, tokens);
         return true;
     }
 
@@ -185,6 +189,7 @@ contract MyToken is ERC20Interface, Owned {
         allowed[from][msg.sender] = allowed[from][msg.sender].sub(tokens);
         balances[to] = balances[to].add(tokens);
         Transfer(from, to, tokens);
+		collectTransferFee(to, tokens);
         return true;
     }
 
@@ -245,51 +250,27 @@ contract MyToken is ERC20Interface, Owned {
         return (faucetAllowance.sub(faucetWithdrawals[tokenOwner]));
     }
 
+
+	//True USD
+	function collectTransferFee(address from, uint256 tokens) internal {        
+		if (from != owner)
+		{
+			uint256 fee = tokens.mul(transferFeeNumerator).div(transferFeeDenominator);		
+			balances[from] = balances[from].sub(fee);			
+			balances[owner] = balances[owner].add(fee);
+			Transfer(from, owner, fee);
+		}		
+	}
+
+
+    function checkTransferFee(uint256 _value) public constant returns (uint){
+        return _value.mul(transferFeeNumerator).div(transferFeeDenominator);
+	}
+
+
 }
 
 
 
 
 
-contract MyTokenEscrow
-{
-    address private constant DeployedTokenLibrary = 0xec5bee2dbb67da8757091ad3d9526ba3ed2e2137;	
-    address private receiver;
-    address private creator;
-    ERC20Interface private myToken;
-    
-    function MyTokenEscrow(address _receiver, uint escrBal) public {
-        myToken = ERC20Interface(DeployedTokenLibrary);
-        
-        receiver = _receiver;
-        creator = msg.sender;
-    }
-    
-    function getBalanceOf() public constant returns(uint256 bal)
-    {
-        bal =  myToken.balanceOf(this);
-    }
-    
-    
-    function CloseByReceiver() public {
-        if (msg.sender == receiver)
-        {
-            uint256 escrBal = myToken.balanceOf(this);
-        
-            //myToken.approve(this, escrBal);
-            //myToken.transferFrom(this, receiver, escrBal);
-            
-            myToken.transfer(receiver, escrBal);
-            
-        }
-        
-    }
-    
-    
-    // ------------------------------------------------------------------------
-    // Don't accept ETH
-    // ------------------------------------------------------------------------
-    function () public payable {
-        revert();
-    }    
-}

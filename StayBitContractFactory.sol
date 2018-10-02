@@ -3,22 +3,96 @@ pragma solidity ^0.4.15;
 import "./FlexibleEscrowLib.sol";
 import "./ModerateEscrowLib.sol";
 import "./StrictEscrowLib.sol";
+import "./Ownable.sol";
 
-contract StayBitContractFactory
+contract StayBitContractFactory is Ownable
 {
+    struct EscrowTokenInfo { 
+		uint _RentMin;  //Min value for rent per day
+		uint _RentMax;  //Max value for rent per day
+		address _ContractAddress; //Token address
+		uint _ContractFeeBal;  //Earned balance
+    }
+
 	using BaseEscrowLib for BaseEscrowLib.EscrowContractState;
     mapping(bytes32 => BaseEscrowLib.EscrowContractState) private contracts;
-
-	event contractCreated(int Id, string Guid);
+	mapping(uint => EscrowTokenInfo) private supportedTokens;
+	bool private CreateEnabled; // Enables / disables creation of new contracts
+	bool private PercentageFee;  // true - percentage fee per contract false - fixed fee per contract
+	uint ContractFee;  //Either fixed amount or percentage
+		
+	event contractCreated(int rentPerDay, int cancelPolicy, uint moveInDate, uint moveOutDate, int secDeposit, address landlord, uint tokenId, int Id, string Guid, uint extraAmount);
+	event contractTerminated(int Id, string Guid, int State);
 
 	function StayBitContractFactory()
-	{}
+	{
+		CreateEnabled = true;
+		PercentageFee = false;
+		ContractFee = 0;
+	}
+
+	function SetFactoryParams(bool enable, bool percFee, uint contrFee) public onlyOwner
+	{
+		CreateEnabled = enable;	
+		PercentageFee = percFee;
+		ContractFee = contrFee;
+	}
+
+	function GetFeeBalance(uint tokenId) public constant returns (uint)
+	{
+		return supportedTokens[tokenId]._ContractFeeBal;
+	}
+
+	function WithdrawFeeBalance(uint tokenId, address to, uint amount) public onlyOwner
+	{	    
+		require(supportedTokens[tokenId]._RentMax > 0);		
+		require(supportedTokens[tokenId]._ContractFeeBal >= amount);		
+		supportedTokens[tokenId]._ContractFeeBal -= amount;		
+		ERC20Interface tokenApi = ERC20Interface(supportedTokens[tokenId]._ContractAddress);
+		tokenApi.transfer(to, amount);
+	}
+
+
+	function SetTokenInfo(uint tokenId, address tokenAddress, uint rentMin, uint rentMax) public onlyOwner
+	{
+		supportedTokens[tokenId]._RentMin = rentMin;
+		supportedTokens[tokenId]._RentMax = rentMax;
+		supportedTokens[tokenId]._ContractAddress = tokenAddress;
+	}
+
+	function CalculateCreateFee(uint amount) public constant returns (uint)
+	{
+		uint result = 0;
+		if (PercentageFee)
+		{
+			result = amount * ContractFee / 100;
+		}
+		else
+		{
+			result = ContractFee;
+		}
+		return result;
+	}
+
 
     //75, 1, 1533417601, 1534281601, 100, "0x4b0897b0513fdc7c541b6d9d7e929c4e5364d2db", "", "0x4514d8d91a10bda73c10e2b8ffd99cb9646620a9", 1, "test"
-	function CreateContract(int rentPerDay, int cancelPolicy, uint moveInDate, uint moveOutDate, int secDeposit, address landlord, string doorLockData, address token, int Id, string Guid) public
+	function CreateContract(int rentPerDay, int cancelPolicy, uint moveInDate, uint moveOutDate, int secDeposit, address landlord, string doorLockData, uint tokenId, int Id, string Guid, uint extraAmount) public
 	{
+		//It must be enabled
+		require (CreateEnabled && rentPerDay > 0 && secDeposit > 0 && moveInDate > 0 && moveOutDate > 0 && landlord != address(0) && landlord != msg.sender && Id > 0);
+
+		//Token must be supported
+		require(supportedTokens[tokenId]._RentMax > 0);
+
+		//Rent per day values must be within range for this token
+		require(supportedTokens[tokenId]._RentMin <= uint(rentPerDay) && supportedTokens[tokenId]._RentMax >= uint(rentPerDay));
+
 		//Check that we support cancel policy
-		require (cancelPolicy == 1 || cancelPolicy == 2 || cancelPolicy == 3);
+		//TESTNET
+		//require (cancelPolicy == 1 || cancelPolicy == 2 || cancelPolicy == 3);
+
+		//PRODUCTION
+		require (cancelPolicy == 1 || cancelPolicy == 2);
 
 		//Check that GUID does not exist		
 		require (contracts[keccak256(Guid)]._Id == 0);
@@ -33,22 +107,32 @@ contract StayBitContractFactory
 		contracts[keccak256(Guid)]._landlord = landlord;
 		contracts[keccak256(Guid)]._tenant = msg.sender;
 		contracts[keccak256(Guid)]._ContractAddress = this;		
-		contracts[keccak256(Guid)]._tokenApi = ERC20Interface(token);
+		contracts[keccak256(Guid)]._tokenApi = ERC20Interface(supportedTokens[tokenId]._ContractAddress);
 		contracts[keccak256(Guid)]._Id = Id;
 		contracts[keccak256(Guid)]._Guid = Guid;
 		contracts[keccak256(Guid)]._CancelPolicy = cancelPolicy;
 
 		contracts[keccak256(Guid)].initialize();
 
-		require(uint(contracts[keccak256(Guid)]._TotalAmount) <= contracts[keccak256(Guid)]._tokenApi.balanceOf(msg.sender));
+		uint256 startBalance = contracts[keccak256(Guid)]._tokenApi.balanceOf(this);
 
-		//Fund 
-		contracts[keccak256(Guid)]._tokenApi.transferFrom(msg.sender, this, uint(contracts[keccak256(Guid)]._TotalAmount));
+		//Calculate our fees
+		supportedTokens[tokenId]._ContractFeeBal += CalculateCreateFee(uint(contracts[keccak256(Guid)]._TotalAmount));
 
-		contracts[keccak256(Guid)]._Balance = uint(contracts[keccak256(Guid)]._TotalAmount);
+		//Check that tenant has funds
+		require(extraAmount + uint(contracts[keccak256(Guid)]._TotalAmount) + CalculateCreateFee(uint(contracts[keccak256(Guid)]._TotalAmount)) <= contracts[keccak256(Guid)]._tokenApi.balanceOf(msg.sender));
+
+		//Fund. Token fee, if any, will be witheld here 
+		contracts[keccak256(Guid)]._tokenApi.transferFrom(msg.sender, this, extraAmount + uint(contracts[keccak256(Guid)]._TotalAmount) + CalculateCreateFee(uint(contracts[keccak256(Guid)]._TotalAmount)));
+
+		//We need to measure balance diff because some tokens (TrueUSD) charge fees per transfer
+		contracts[keccak256(Guid)]._Balance = contracts[keccak256(Guid)]._tokenApi.balanceOf(this) - startBalance - CalculateCreateFee(uint(contracts[keccak256(Guid)]._TotalAmount));
+
+		//Check that balance is still greater than contract's amount
+		require(contracts[keccak256(Guid)]._Balance >= uint(contracts[keccak256(Guid)]._TotalAmount));
 
 		//raise event
-		contractCreated(Id, Guid);
+		contractCreated(rentPerDay, cancelPolicy, moveInDate, moveOutDate, secDeposit, landlord, tokenId, Id, Guid, extraAmount);
 	}
 
 	function() payable
@@ -101,9 +185,14 @@ contract StayBitContractFactory
 			}
 			else{
 				revert();
+				return;
 			}
 
 			SendTokens(Guid);
+
+			//Raise event
+			contractTerminated(contracts[keccak256(Guid)]._Id, Guid, contracts[keccak256(Guid)]._State);
+
 		}
 	}
 
@@ -127,9 +216,13 @@ contract StayBitContractFactory
 			}
 			else{
 				revert();
+				return;
 			}
 
 			SendTokens(Guid);
+
+			//Raise event
+			contractTerminated(contracts[keccak256(Guid)]._Id, Guid, contracts[keccak256(Guid)]._State);
 		}
 	}
     
@@ -161,6 +254,7 @@ contract StayBitContractFactory
 	{		
 		if (contracts[keccak256(Guid)]._Id != 0)
 		{
+			require(SecDeposit >= 0 && SecDeposit <= uint256(contracts[keccak256(Guid)]._SecDeposit));
 			require(contracts[keccak256(Guid)]._State == BaseEscrowLib.GetContractStateActive() && msg.sender == contracts[keccak256(Guid)]._landlord);
 
 			if (contracts[keccak256(Guid)]._CancelPolicy == 1)
@@ -177,15 +271,18 @@ contract StayBitContractFactory
 			}
 			else{
 				revert();
+				return;
 			}
 
 			SendTokens(Guid);
+
+			//Raise event
+			contractTerminated(contracts[keccak256(Guid)]._Id, Guid, contracts[keccak256(Guid)]._State);
 		}
 	}
 
 	function SendTokens(string Guid) private
-	{
-		
+	{		
 		if (contracts[keccak256(Guid)]._Id != 0)
 		{
 			if (contracts[keccak256(Guid)]._landlBal > 0)
@@ -203,7 +300,6 @@ contract StayBitContractFactory
 				contracts[keccak256(Guid)]._tokenApi.transfer(contracts[keccak256(Guid)]._tenant, tenantBal);			
 				contracts[keccak256(Guid)]._Balance -= tenantBal;
 			}
-		}
-			    
+		}			    
 	}
 }

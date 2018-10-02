@@ -110,7 +110,7 @@ library ModerateEscrowLib
         sGuid = self._Guid;
 				
 		require(nCurrentStage == BaseEscrowLib.GetContractStagePreMoveIn() && nActualBalance >= self._TotalAmount && 
-				DateTime.compareDatesWithoutTime(nCurrentDate, self._MoveInDate) >= 0);
+				DateTime.compareDateTimesForContract(nCurrentDate, self._MoveInDate) >= 0);
 
         BaseEscrowLib.ContractLogEvent(nCurrentStage, BaseEscrowLib.GetLogMessageInfo(), nCurrentDate, sGuid, "Tenant signaled move-in");
 
@@ -129,7 +129,7 @@ library ModerateEscrowLib
         sGuid = self._Guid;
 
 		require(nCurrentStage == BaseEscrowLib.GetContractStagePreMoveIn() && nActualBalance >= cancelFee && 
-				DateTime.compareDatesWithoutTime(nCurrentDate, self._MoveInDate) == 0);
+				DateTime.compareDateTimesForContract(nCurrentDate, self._MoveInDate) == 0);
 
 		(tenantBal, landlBal) = BaseEscrowLib.splitBalanceAccordingToRatings(cancelFee,0,0);
 					
@@ -163,7 +163,7 @@ library ModerateEscrowLib
 		}
 		else if (BaseEscrowLib.GetCurrentStage(self) == BaseEscrowLib.GetContractStagePreMoveIn())
 		{	
-			if (DateTime.compareDatesWithoutTime(nCurrentDate, self._MoveInDate) > 0 && 
+			if (DateTime.compareDateTimesForContract(nCurrentDate, self._MoveInDate) > 0 && 
 				!self._TenantConfirmedMoveIn)
 			{
 				//Landlord gets cancell fee if tenant did not signal anything after move in date
